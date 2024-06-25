@@ -46,7 +46,7 @@ def value_iteration(env, gamma=0.5, epsilon=0.01):
                 for action, name in zip(actions, action_names):
                     dy, dx = action
                     next_y, next_x = y + dy, x + dx
-                    if 0 <= next_y < H and 0 <= next_x < W:
+                    if 0 <= next_y < H and 0 <= next_x < W: #Check if the sate in the limits of the game
                         success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
                         failure_reward = (
                             (get_reward(x + dx, y + dy) + gamma * V[y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W else get_reward(x, y)) +
