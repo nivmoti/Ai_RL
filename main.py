@@ -2,6 +2,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk
 
+
 # Define the environment
 class GameEnvironment:
     def __init__(self, width, height, rewards, p, step_cost):
@@ -19,15 +20,49 @@ class GameEnvironment:
                 self.grid[y, x] = r
 
     def is_terminal(self, x, y):
-        return any((x, y) == (i, j) for (i, j, r) in self.rewards)
+        return any((x, y) == (i, j) and r != 0 for (i, j, r) in self.rewards)
 
-# Define Value Iteration Algorithm
+    def is_wall(self, x, y):
+        return any((x, y) == (i, j) and r == 0 for (i, j, r) in self.rewards)
+
+def simulate_step(env, y, x, action):
+    """
+    Simulates the next state and reward based on the action taken,
+    considering the probability of movement success and failure.
+    """
+    actions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # left, right, up, down
+    action_failures = [((1, 0), (-1, 0)), ((-1, 0), (1, 0)), ((0, -1), (0, 1)), ((0, 1), (0, -1))]
+    dy, dx = actions[action]
+    next_y, next_x = y + dy, x + dx
+
+    if np.random.rand() < env.p:  # Successful move
+        if next_x < 0 or next_x >= env.width or next_y < 0 or next_y >= env.height or env.is_wall(next_x, next_y):
+            return y, x, env.step_cost  # Stay in the same place if moving into a wall
+        return next_y, next_x, env.grid[next_y, next_x]
+    else:  # Failed move, move right or left relative to the original move
+        fail1, fail2 = action_failures[action]
+        fail1_y, fail1_x = y + fail1[0], x + fail1[1]
+        fail2_y, fail2_x = y + fail2[0], x + fail2[1]
+
+        p_right = (1 - env.p) / 2
+        p_left = 1 - env.p - p_right
+
+        if np.random.rand() < p_right:  # Move right
+            if fail1_x < 0 or fail1_x >= env.width or fail1_y < 0 or fail1_y >= env.height or env.is_wall(fail1_x, fail1_y):
+                return y, x, env.step_cost  # Stay in the same place if moving into a wall
+            return fail1_y, fail1_x, env.grid[fail1_y, fail1_x]
+        else:  # Move left
+            if fail2_x < 0 or fail2_x >= env.width or fail2_y < 0 or fail2_y >= env.height or env.is_wall(fail2_x, fail2_y):
+                return y, x, env.step_cost  # Stay in the same place if moving into a wall
+            return fail2_y, fail2_x, env.grid[fail2_y, fail2_x]
+
 def value_iteration(env, gamma=0.5, epsilon=0.01):
     H, W = env.height, env.width
     V = np.zeros((H, W))
-    policy = np.zeros((H, W), dtype=str)
+    policy = np.full((H, W), None)  # Initialize policy with None
     actions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # up, down, left, right
     action_names = ["up", "down", "left", "right"]
+    action_failures = [((0, -1), (0, 1)), ((0, 1), (0, -1)), ((-1, 0), (1, 0)), ((1, 0), (-1, 0))]
 
     def get_reward(x, y):
         for (i, j, r) in env.rewards:
@@ -39,29 +74,41 @@ def value_iteration(env, gamma=0.5, epsilon=0.01):
         delta = 0
         for y in range(H):
             for x in range(W):
-                if env.is_terminal(x, y):
+                if env.is_terminal(x, y) or env.is_wall(x, y):
                     continue
                 v = V[y, x]
                 new_v = float('-inf')
-                for action, name in zip(actions, action_names):
+                for action, name, failures in zip(actions, action_names, action_failures):
                     dy, dx = action
+                    fail1, fail2 = failures
                     next_y, next_x = y + dy, x + dx
-                    if 0 <= next_y < H and 0 <= next_x < W: #Check if the sate in the limits of the game
-                        success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
-                        failure_reward = (
-                            (get_reward(x + dx, y + dy) + gamma * V[y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W else get_reward(x, y)) +
-                            (get_reward(x - dx, y - dy) + gamma * V[y - dy, x - dx] if 0 <= y - dy < H and 0 <= x - dx < W else get_reward(x, y))
-                        ) / 2
-                        value = env.p * success_reward + (1 - env.p) * failure_reward
-                        if value > new_v:
-                            new_v = value
-                            policy[y, x] = name
+                    fail1_y, fail1_x = y + fail1[0], x + fail1[1]
+                    fail2_y, fail2_x = y + fail2[0], x + fail2[1]
+
+                    if next_x < 0 or next_x >= W or next_y < 0 or next_y >= H or env.is_wall(next_x, next_y):
+                        next_y, next_x = y, x  # Stay in the same place if moving into a wall
+                    if fail1_x < 0 or fail1_x >= W or fail1_y < 0 or fail1_y >= H or env.is_wall(fail1_x, fail1_y):
+                        fail1_y, fail1_x = y, x  # Stay in the same place if moving into a wall
+                    if fail2_x < 0 or fail2_x >= W or fail2_y < 0 or fail2_y >= H or env.is_wall(fail2_x, fail2_y):
+                        fail2_y, fail2_x = y, x  # Stay in the same place if moving into a wall
+
+                    success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
+                    failure_reward = (
+                        (get_reward(fail1_x, fail1_y) + gamma * V[fail1_y, fail1_x]) +
+                        (get_reward(fail2_x, fail2_y) + gamma * V[fail2_y, fail2_x])
+                    ) / 2
+                    value = env.p * success_reward + (1 - env.p) * failure_reward
+                    if value > new_v:
+                        new_v = value
+                        policy[y, x] = name
                 V[y, x] = get_reward(x, y) + new_v
                 delta = max(delta, abs(v - V[y, x]))
         if delta < epsilon:
             break
 
     return V, policy
+
+
 
 # Define Policy Iteration Algorithm
 def policy_iteration(env, gamma=0.5, epsilon=0.01):
@@ -88,19 +135,24 @@ def policy_iteration(env, gamma=0.5, epsilon=0.01):
             delta = 0
             for y in range(H):
                 for x in range(W):
-                    if env.is_terminal(x, y):
+                    if env.is_terminal(x, y) or env.is_wall(x, y):
                         continue
                     v = V[y, x]
                     dy, dx = actions[policy[y, x]]
                     next_y, next_x = y + dy, x + dx
-                    if 0 <= next_y < H and 0 <= next_x < W:
-                        success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
-                        failure_reward = (
-                            (get_reward(x + dx, y + dy) + gamma * V[y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W else get_reward(x, y)) +
-                            (get_reward(x - dx, y - dy) + gamma * V[y - dy, x - dx] if 0 <= y - dy < H and 0 <= x - dx < W else get_reward(x, y))
-                        ) / 2
-                        V[y, x] = env.p * success_reward + (1 - env.p) * failure_reward
-                        delta = max(delta, abs(v - V[y, x]))
+                    if next_x < 0 or next_x >= W or next_y < 0 or next_y >= H or env.is_wall(next_x, next_y):
+                        next_y, next_x = y, x  # Stay in the same place if moving into a wall
+                    success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
+                    failure_reward = (
+                                             (get_reward(x + dx, y + dy) + gamma * V[
+                                                 y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W and not env.is_wall(
+                                                 x + dx, y + dy) else get_reward(x, y)) +
+                                             (get_reward(x - dx, y - dy) + gamma * V[
+                                                 y - dy, x - dx] if 0 <= y - dy < H and 0 <= x - dx < W and not env.is_wall(
+                                                 x - dx, y - dy) else get_reward(x, y))
+                                     ) / 2
+                    V[y, x] = env.p * success_reward + (1 - env.p) * failure_reward
+                    delta = max(delta, abs(v - V[y, x]))
             if delta < epsilon:
                 break
 
@@ -108,7 +160,7 @@ def policy_iteration(env, gamma=0.5, epsilon=0.01):
         is_policy_stable = True
         for y in range(H):
             for x in range(W):
-                if env.is_terminal(x, y):
+                if env.is_terminal(x, y) or env.is_wall(x, y):
                     continue
                 old_action = policy[y, x]
                 best_action = old_action
@@ -116,28 +168,33 @@ def policy_iteration(env, gamma=0.5, epsilon=0.01):
                 for action in ["up", "down", "left", "right"]:
                     dy, dx = actions[action]
                     next_y, next_x = y + dy, x + dx
-                    if 0 <= next_y < H and 0 <= next_x < W:
-                        success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
-                        failure_reward = (
-                            (get_reward(x + dx, y + dy) + gamma * V[y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W else get_reward(x, y)) +
-                            (get_reward(x - dx, y - dy) + gamma * V[y - dy, x - dx] if 0 <= y - dy < H and 0 <= x - dx < W else get_reward(x, y))
-                        ) / 2
-                        value = env.p * success_reward + (1 - env.p) * failure_reward
-                        if value > best_value:
-                            best_value = value
-                            best_action = action
+                    if next_x < 0 or next_x >= W or next_y < 0 or next_y >= H or env.is_wall(next_x, next_y):
+                        next_y, next_x = y, x  # Stay in the same place if moving into a wall
+                    success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
+                    failure_reward = (
+                                             (get_reward(x + dx, y + dy) + gamma * V[
+                                                 y + dy, x + dx] if 0 <= y + dy < H and 0 <= x + dx < W and not env.is_wall(
+                                                 x + dx, y + dy) else get_reward(x, y)) +
+                                             (get_reward(x - dx, y - dy) + gamma * V[
+                                                 y - dy, x - dx] if 0 <= y - dy < H and 0 <= x - dx < W and not env.is_wall(
+                                                 x - dx, y - dy) else get_reward(x, y))
+                                     ) / 2
+                    value = env.p * success_reward + (1 - env.p) * failure_reward
+                    if value > best_value:
+                        best_value = value
+                        best_action = action
                 policy[y, x] = best_action
                 if old_action != best_action:
                     is_policy_stable = False
 
     return V, policy
 
+
 # Define Q-Learning Algorithm
 def q_learning(env, gamma=0.5, alpha=0.1, epsilon=0.1, episodes=1000):
     H, W = env.height, env.width
     Q = np.zeros((H, W, 4))
-    actions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # left, right, up, down
-    action_indices = ["left", "right", "up", "down"]
+    actions = ["left", "right", "up", "down"]
 
     def get_reward(x, y):
         for (i, j, r) in env.rewards:
@@ -147,18 +204,14 @@ def q_learning(env, gamma=0.5, alpha=0.1, epsilon=0.1, episodes=1000):
 
     for _ in range(episodes):
         x, y = np.random.randint(0, W), np.random.randint(0, H)
-        while not env.is_terminal(x, y):
-            if np.random.uniform(0, 1) < epsilon:
+        while not env.is_terminal(x, y) and not env.is_wall(x, y):
+            if np.random.rand() < epsilon:
                 action = np.random.choice(range(4))
             else:
                 action = np.argmax(Q[y, x])
 
-            dy, dx = actions[action]
-            next_y, next_x = y + dy, x + dx
-            if next_x < 0 or next_x >= W or next_y < 0 or next_y >= H:
-                next_x, next_y = x, y  # Stay in place if out of bounds
+            next_y, next_x, reward = simulate_step(env, y, x, action)
 
-            reward = get_reward(next_x, next_y)
             if env.is_terminal(next_x, next_y):
                 Q[y, x, action] = Q[y, x, action] + alpha * (reward - Q[y, x, action])
                 break
@@ -168,15 +221,17 @@ def q_learning(env, gamma=0.5, alpha=0.1, epsilon=0.1, episodes=1000):
 
             x, y = next_x, next_y
 
-    policy = np.zeros((H, W), dtype=str)
+    policy = np.full((H, W), None, dtype=object)  # Initialize policy with None
     for y in range(H):
         for x in range(W):
-            best_action = np.argmax(Q[y, x])
-            policy[y, x] = action_indices[best_action]
+            if not env.is_terminal(x, y) and not env.is_wall(x, y):
+                best_action = np.argmax(Q[y, x])
+                policy[y, x] = actions[best_action]
 
     return Q, policy
 
-# Create the UI
+
+
 class GameUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -240,6 +295,8 @@ class GameUI(tk.Tk):
                     color = "green"
                 elif value < 0:
                     color = "red"
+                elif self.env.is_wall(x, y):
+                    color = "black"  # Wall
                 tk.Label(self.grid_frame, text=str(value), bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(row=y, column=x)
 
     def run_value_iteration(self):
@@ -265,7 +322,10 @@ class GameUI(tk.Tk):
                     color = "green"
                 elif self.env.grid[y, x] < 0:
                     color = "red"
-                tk.Label(self.grid_frame, text=str(action), bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(row=y, column=x)
+                elif self.env.is_wall(x, y):
+                    color = "black"  # Wall
+                text = "" if action is None else action  # Don't display policy for terminal or wall states
+                tk.Label(self.grid_frame, text=text, bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(row=y, column=x)
 
 if __name__ == "__main__":
     app = GameUI()
