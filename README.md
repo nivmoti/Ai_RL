@@ -20,8 +20,14 @@ To See the final results we added two things:
 
 # Examples
 
-How to enter the values correctly:
-![alt text]()
-Run Create Environment First
+How to enter the values correctly: </br>
+![alt text](https://github.com/nivmoti/Ai_RL/blob/main/Pictures/realPic1.PNG)
 
-Running the Value Iteration Model
+Run Create Environment First</br>
+![alt text](https://github.com/nivmoti/Ai_RL/blob/main/Pictures/pic2.PNG)
+
+Running the Value Iteration Model</br>
+![alt text](https://github.com/nivmoti/Ai_RL/blob/main/Pictures/pic3.PNG)
+
+Example of Results:</br>
+![alt text](https://github.com/nivmoti/Ai_RL/blob/main/Pictures/pic4.PNG)
