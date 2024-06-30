@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 import tkinter as tk
 from tkinter import ttk
@@ -25,6 +26,7 @@ class GameEnvironment:
     def is_wall(self, x, y):
         return any((x, y) == (i, j) and r == 0 for (i, j, r) in self.rewards)
 
+
 def simulate_step(env, y, x, action):
     """
     Simulates the next state and reward based on the action taken,
@@ -48,13 +50,16 @@ def simulate_step(env, y, x, action):
         p_left = 1 - env.p - p_right
 
         if np.random.rand() < p_right:  # Move right
-            if fail1_x < 0 or fail1_x >= env.width or fail1_y < 0 or fail1_y >= env.height or env.is_wall(fail1_x, fail1_y):
+            if fail1_x < 0 or fail1_x >= env.width or fail1_y < 0 or fail1_y >= env.height or env.is_wall(fail1_x,
+                                                                                                          fail1_y):
                 return y, x, env.step_cost  # Stay in the same place if moving into a wall
             return fail1_y, fail1_x, env.grid[fail1_y, fail1_x]
         else:  # Move left
-            if fail2_x < 0 or fail2_x >= env.width or fail2_y < 0 or fail2_y >= env.height or env.is_wall(fail2_x, fail2_y):
+            if fail2_x < 0 or fail2_x >= env.width or fail2_y < 0 or fail2_y >= env.height or env.is_wall(fail2_x,
+                                                                                                          fail2_y):
                 return y, x, env.step_cost  # Stay in the same place if moving into a wall
             return fail2_y, fail2_x, env.grid[fail2_y, fail2_x]
+
 
 def value_iteration(env, gamma=0.5, epsilon=0.01):
     H, W = env.height, env.width
@@ -94,9 +99,9 @@ def value_iteration(env, gamma=0.5, epsilon=0.01):
 
                     success_reward = get_reward(next_x, next_y) + gamma * V[next_y, next_x]
                     failure_reward = (
-                        (get_reward(fail1_x, fail1_y) + gamma * V[fail1_y, fail1_x]) +
-                        (get_reward(fail2_x, fail2_y) + gamma * V[fail2_y, fail2_x])
-                    ) / 2
+                                             (get_reward(fail1_x, fail1_y) + gamma * V[fail1_y, fail1_x]) +
+                                             (get_reward(fail2_x, fail2_y) + gamma * V[fail2_y, fail2_x])
+                                     ) / 2
                     value = env.p * success_reward + (1 - env.p) * failure_reward
                     if value > new_v:
                         new_v = value
@@ -107,7 +112,6 @@ def value_iteration(env, gamma=0.5, epsilon=0.01):
             break
 
     return V, policy
-
 
 
 # Define Policy Iteration Algorithm
@@ -217,19 +221,73 @@ def q_learning(env, gamma=0.5, alpha=0.1, epsilon=0.1, episodes=1000):
                 break
             else:
                 next_action = np.argmax(Q[next_y, next_x])
-                Q[y, x, action] = Q[y, x, action] + alpha * (reward + gamma * Q[next_y, next_x, next_action] - Q[y, x, action])
+                Q[y, x, action] = Q[y, x, action] + alpha * (
+                            reward + gamma * Q[next_y, next_x, next_action] - Q[y, x, action])
 
             x, y = next_x, next_y
 
     policy = np.full((H, W), None, dtype=object)  # Initialize policy with None
+    reward = np.zeros((H, W))
     for y in range(H):
         for x in range(W):
             if not env.is_terminal(x, y) and not env.is_wall(x, y):
                 best_action = np.argmax(Q[y, x])
+                reward[y, x] = Q[y, x, best_action]
                 policy[y, x] = actions[best_action]
 
-    return Q, policy
+    return Q, policy, reward
 
+
+def learn_mdp_from_experience(experience):
+    Rai = defaultdict(lambda: defaultdict(float))
+    Nai = defaultdict(lambda: defaultdict(int))
+    Naij = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+    for (i, a, r, j) in experience:
+        Rai[i][a] += r
+        Nai[i][a] += 1
+        Naij[i][a][j] += 1
+
+    reward_model = defaultdict(lambda: defaultdict(float))
+    transition_model = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+
+    for state in Nai:
+        for action in Nai[state]:
+            reward_model[state][action] = Rai[state][action] / Nai[state][action]
+            for next_state in Naij[state][action]:
+                transition_model[state][action][next_state] = Naij[state][action][next_state] / Nai[state][action]
+
+    return transition_model, reward_model
+
+
+def model_based_rl(env, gamma=0.9, epsilon=0.01, episodes=1000, ep_length=10):
+    H, W = env.height, env.width
+    V = np.zeros((H, W))
+    policy = np.random.choice(["up", "down", "left", "right"], size=(H, W))
+    experience = []
+
+    # number of epochs
+    for k in range(episodes):
+        x, y = np.random.randint(0, W), np.random.randint(0, H)
+        state = (x, y)  # Change later only for clarity
+
+        # cant start from this one
+        if env.is_terminal(x, y) or env.is_wall(x, y):
+            continue
+
+        # inner run
+        for i in range(ep_length):
+            action = policy[state]
+            next_state, reward = env.step(action)  # how can make take the next based on the action
+            experience.append((state, action, reward, next_state))
+            state = next_state
+
+        transition_model, reward = learn_mdp_from_experience(experience)
+        new_env = GameEnvironment(W, H, reward, env.p, env.step_cost)  # Step cost still not sure how
+        V, new_policy = value_iteration(new_env)
+        policy = new_policy
+
+    return V, policy
 
 
 class GameUI(tk.Tk):
@@ -264,17 +322,45 @@ class GameUI(tk.Tk):
         self.step_cost_entry = tk.Entry(self.control_frame)
         self.step_cost_entry.grid(row=3, column=1)
 
-        self.create_env_button = tk.Button(self.control_frame, text="Create Environment", command=self.create_environment)
+        self.create_env_button = tk.Button(self.control_frame, text="Create Environment",
+                                           command=self.create_environment)
         self.create_env_button.grid(row=4, column=0, columnspan=2)
 
-        self.value_iteration_button = tk.Button(self.control_frame, text="Value Iteration", command=self.run_value_iteration)
+        self.value_iteration_button = tk.Button(self.control_frame, text="Value Iteration",
+                                                command=self.run_value_iteration)
         self.value_iteration_button.grid(row=5, column=0)
 
-        self.policy_iteration_button = tk.Button(self.control_frame, text="Policy Iteration", command=self.run_policy_iteration)
-        self.policy_iteration_button.grid(row=5, column=1)
+        self.model_based_button = tk.Button(self.control_frame, text="Model Based",
+                                            command=self.run_model_based)
+        self.model_based_button.grid(row=5, column=1)
 
         self.q_learning_button = tk.Button(self.control_frame, text="Q-Learning", command=self.run_q_learning)
         self.q_learning_button.grid(row=6, column=0, columnspan=2)
+
+        self.result_button = tk.Button(self.control_frame, text="Results", command=self.results)
+        self.result_button.grid(row=7, column=0, columnspan=2)
+
+    def results(self):
+        MDP_V, MDP_policy = value_iteration(self.env)
+        MBRL_V, MBRL_policy = policy_iteration(self.env)
+        Q, MFRL_policy, MFRL_reward = q_learning(self.env)
+
+        np.set_printoptions(formatter={'float': '{: 0.6f}'.format})
+
+        print("-" * 30 + "\n d(MDP,MBRL)")
+        resul_1 = MBRL_V - MDP_V
+        print(resul_1)
+        print(f"average: {np.mean(resul_1[resul_1 != 0])}")
+
+        print("-" * 30 + "\n d(MDP,MFRL)")
+        resul_2 = MFRL_reward - MDP_V
+        print(resul_2)
+        print(f"average: {np.mean(resul_2[resul_2 != 0])}")
+
+        print("-" * 30 + "\n d(MBRL,MFRL)")
+        resul_3 = MFRL_reward - MBRL_V
+        print(resul_3)
+        print(f"average: {np.mean(resul_3[resul_3 != 0])}")
 
     def create_environment(self):
         grid_size = tuple(map(int, self.grid_size_entry.get().split(',')))
@@ -297,19 +383,32 @@ class GameUI(tk.Tk):
                     color = "red"
                 elif self.env.is_wall(x, y):
                     color = "black"  # Wall
-                tk.Label(self.grid_frame, text=str(value), bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(row=y, column=x)
+                tk.Label(self.grid_frame, text=str(value), bg=color, width=4, height=2, borderwidth=1,
+                         relief="solid").grid(row=y, column=x)
 
     def run_value_iteration(self):
         V, policy = value_iteration(self.env)
         self.display_policy(policy)
+        # Print results:
+        print("-" * 30)
+        print("Value Iteration")
+        print(V)
 
-    def run_policy_iteration(self):
+    def run_model_based(self):
         V, policy = policy_iteration(self.env)
         self.display_policy(policy)
+        # Print results:
+        print("-" * 30)
+        print("Model Based")
+        print(V)
 
     def run_q_learning(self):
-        Q, policy = q_learning(self.env)
+        Q, policy, reward = q_learning(self.env)
         self.display_policy(policy)
+        # Print results:
+        print("-" * 30)
+        print("Q learning")
+        print(reward)
 
     def display_policy(self, policy):
         for widget in self.grid_frame.winfo_children():
@@ -325,7 +424,9 @@ class GameUI(tk.Tk):
                 elif self.env.is_wall(x, y):
                     color = "black"  # Wall
                 text = "" if action is None else action  # Don't display policy for terminal or wall states
-                tk.Label(self.grid_frame, text=text, bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(row=y, column=x)
+                tk.Label(self.grid_frame, text=text, bg=color, width=4, height=2, borderwidth=1, relief="solid").grid(
+                    row=y, column=x)
+
 
 if __name__ == "__main__":
     app = GameUI()
